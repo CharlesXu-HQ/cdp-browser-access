@@ -29,6 +29,40 @@
   首次连接可能出现授权弹窗，点「允许」即可。
 - macOS 需要可用的 `sqlite3`（系统自带，或 conda / Homebrew 提供的都行），用于读取浏览器历史
 
+### 其它 Chromium 浏览器（Arc）
+
+Chrome / Chrome Canary / Chromium / Edge 都通过各自在 `chrome://inspect#remote-debugging` 开关打开时写下的 `DevToolsActivePort` 文件被发现。
+
+**Arc 不走这条路：**
+
+- Arc 自带的 `arc://inspect#remote-debugging` 开关虽然也会开出端口并写 `DevToolsActivePort`，但**那个服务器无条件拒绝外部 CDP 连接** —— 实测在 Origin / User-Agent / Host / 子协议的各种组合下都是 `HTTP 403 Connection rejected`。
+- 带 `--remote-debugging-port` 启动时，Arc 能正常提供 CDP —— 但它此时**不会更新** `DevToolsActivePort`，所以也没法靠那个文件发现。
+
+因此 Arc 必须带调试参数启动：
+
+```bash
+osascript -e 'tell application "Arc" to quit'
+open -a Arc --args --remote-debugging-port=9333
+```
+
+之后即可显式指定：
+
+```bash
+node scripts/check-deps.mjs --browser arc
+# 或持久化：在 config.env 里写 WEB_ACCESS_BROWSER=arc
+
+# 切换浏览器需要重启常驻的 proxy：
+pkill -f cdp-proxy.mjs && node scripts/check-deps.mjs
+```
+
+Chrome 与 Arc 可以同时运行，按各自占用的端口区分（Arc 默认 9333，Chrome 默认 9222）：
+
+```text
+已开启远程调试：Chrome (chrome, port 9222)、Arc (arc, port 9333)
+```
+
+> Arc 不写 Chrome 格式的 `Bookmarks` 文件（它的书签存在 `StorableSidebar.json` 里），`History` 虽是 Chrome 格式但条目极少。所以 `find-url` 在 Arc 上基本只能查到历史。
+
 ## 安装
 
 skill 就是一个目录，放进对应 harness 的 **skills 根目录**即可。

@@ -29,6 +29,40 @@ Forked from [eze-is/web-access](https://github.com/eze-is/web-access) (MIT, by �
   An authorization prompt may appear on first connect — click "Allow".
 - On macOS, a working `sqlite3` (system, conda, or Homebrew are all fine) for reading browser history
 
+### Other Chromium browsers (Arc)
+
+Chrome / Chrome Canary / Chromium / Edge are discovered through the `DevToolsActivePort` file each one writes when its `chrome://inspect#remote-debugging` toggle is on.
+
+**Arc does not work that way:**
+
+- Arc's own `arc://inspect#remote-debugging` toggle does open a port and write `DevToolsActivePort`, but **that server unconditionally rejects external CDP connections** — measured `HTTP 403 Connection rejected` across every combination of Origin / User-Agent / Host / subprotocol tried.
+- Launched with `--remote-debugging-port`, Arc serves CDP normally — but it then does **not** update `DevToolsActivePort`, so it cannot be discovered through that file either.
+
+So Arc must be launched with a debug flag:
+
+```bash
+osascript -e 'tell application "Arc" to quit'
+open -a Arc --args --remote-debugging-port=9333
+```
+
+Then select it explicitly:
+
+```bash
+node scripts/check-deps.mjs --browser arc
+# or persist it — WEB_ACCESS_BROWSER=arc in config.env
+
+# switching browsers requires restarting the resident proxy:
+pkill -f cdp-proxy.mjs && node scripts/check-deps.mjs
+```
+
+Chrome and Arc can run side by side; they are told apart by the port each one claims (Arc defaults to 9333, Chrome to 9222):
+
+```text
+debug endpoint available: Chrome (chrome, port 9222), Arc (arc, port 9333)
+```
+
+> Arc writes no Chrome-format `Bookmarks` file (its bookmarks live in `StorableSidebar.json`), and its `History` is Chrome-format but nearly empty. `find-url` on Arc therefore returns little beyond history.
+
 ## Installation
 
 A skill is just a directory — drop it into the relevant harness's **skills root**.

@@ -40,6 +40,19 @@
    Codex（skills 列表中的 `file:` 路径）。
 5. **修复兜底连接 bug**（`scripts/cdp-proxy.mjs`）：固定调试端口的兜底路径拼出的 WebSocket URL
    缺少 browser UUID，被 Chrome 以非 101 状态码拒绝，导致连接必然超时。详见下一节。
+6. **支持 Arc，并能与 Chrome 区分指定**（`browser-discovery.mjs`、`check-deps.mjs`、`find-url.mjs`）：
+   - 新增 Arc 条目与 `flagPorts` 机制。原因是实测发现 Arc 的行为与其它 Chromium 不同：
+     它自带的 `arc://inspect#remote-debugging` 开关会开端口并写 `DevToolsActivePort`，但该服务器
+     **无条件拒绝外部 CDP 连接**（403）；而带 `--remote-debugging-port` 启动时它**不更新**该文件。
+     因此 Arc 既不能靠文件发现，也不能用自带开关，只能按固定端口发现。
+   - 发现逻辑改为**两轮 + 真实握手校验**：第一轮按各浏览器的 `DevToolsActivePort` 认领端口，
+     第二轮让带 `flagPorts` 的浏览器认领剩余端口（先认领再兜底，避免把 Chrome 的 9222 误记到 Arc 头上）。
+     端口活着但握手失败（如 Arc 的开关模式）会被剔除 —— 不再仅凭「端口在监听」判定可用。
+   - 指定浏览器失败时的报错改为输出该浏览器专属的 `launchHint`（Arc 提示用带参启动并说明开关不可用）。
+   - 修正上游遗留 bug：原版把浏览器 id 当作 URL scheme，会输出 `chrome-canary://inspect` 这类无效地址，
+     现改为 Edge 用 `edge://`、其余用 `chrome://`。
+   - `find-url` 增加 Arc 数据目录，使 `--browser arc` 不再直接报错（但 Arc 无 Chrome 格式书签、
+     History 条目极少，实际价值有限）。
 
 ## 修复与重写：固定调试端口兜底连接
 

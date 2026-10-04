@@ -150,12 +150,21 @@ async function resolveAndReport(override) {
 
     case 'mismatch': {
       const expected = result.override || result.configured;
-      const expectedLabel = knownBrowsers().find(b => b.id === expected)?.label || expected;
+      const entry = knownBrowsers().find(b => b.id === expected);
+      const expectedLabel = entry?.label || expected;
       const sourceDesc = result.source === 'override' ? '本次指定' : '默认偏好';
       console.log(`browser: error — ${sourceDesc}的浏览器是 "${expected}" (${expectedLabel})，但没连上`);
-      console.log(`  Agent 处理顺序：`);
-      console.log(`    1. 先用系统命令打开 ${expectedLabel}（按你所在平台自行选择，如 macOS 的 open -a），再重新运行 node check-deps.mjs`);
-      console.log(`    2. 若仍报相同错误，可能是因为远程调试开关没启用 —— 告诉用户：在 ${expectedLabel} 的地址栏访问 ${expected}://inspect/#remote-debugging，勾选 "Allow remote debugging for this browser instance"`);
+      if (entry?.launchHint) {
+        console.log(`  ${expectedLabel} 的正确启动方式：`);
+        console.log(`    ${entry.launchHint}`);
+      } else {
+        // 修正：inspect 的 scheme 不是浏览器 id。只有 Edge 用 edge://，其余 Chromium 系都用 chrome://
+        // （上游原版会输出 chrome-canary://inspect 这类无效地址）
+        const inspectScheme = expected === 'edge' ? 'edge' : 'chrome';
+        console.log(`  Agent 处理顺序：`);
+        console.log(`    1. 先用系统命令打开 ${expectedLabel}（按你所在平台自行选择，如 macOS 的 open -a），再重新运行 node check-deps.mjs`);
+        console.log(`    2. 若仍报相同错误，可能是因为远程调试开关没启用 —— 告诉用户：在 ${expectedLabel} 的地址栏访问 ${inspectScheme}://inspect/#remote-debugging，勾选 "Allow remote debugging for this browser instance"`);
+      }
       printAvailableHint(result.detected);
       if (result.source === 'preference') {
         console.log(`  也可以编辑 config.env 改默认偏好，或本次临时换浏览器：node check-deps.mjs --browser <id>`);
@@ -164,15 +173,16 @@ async function resolveAndReport(override) {
     }
 
     case 'empty': {
-      // 末路兜底：尝试常见固定端口（用户手动 --remote-debugging-port=9222 启动的场景）
+      // 末路兜底：尝试常见固定端口（用户手动 --remote-debugging-port 启动的场景）
       const fallbackPort = await findFallbackPort();
       if (fallbackPort) {
         console.log(`browser: ok (port ${fallbackPort}) [通过手动调试端口连接]`);
         return { proceed: true };
       }
-      console.log('browser: 未连接 — 没有任何浏览器打开远程调试开关');
+      console.log('browser: 未连接 — 没有检测到任何可用的调试端点');
       console.log(`  支持的浏览器：${knownBrowsers().map(b => b.label).join('、')}`);
-      console.log('  在你想用的浏览器地址栏打开 chrome://inspect/#remote-debugging 或 edge://inspect/#remote-debugging，勾选 "Allow remote debugging for this browser instance"');
+      console.log('  Chrome / Edge / Chromium：在地址栏访问 chrome://inspect/#remote-debugging，勾选 "Allow remote debugging for this browser instance"');
+      console.log('  Arc：该开关无效（会拒绝外部连接）。请退出 Arc 后用 `open -a Arc --args --remote-debugging-port=9333` 启动');
       return { proceed: false, exitCode: 1 };
     }
   }

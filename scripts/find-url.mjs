@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// find-url - 从本地 Chromium 系浏览器（Chrome / Edge）书签/历史中检索 URL
+// find-url - 从本地 Chromium 系浏览器（Chrome / Edge / Arc）书签/历史中检索 URL
 // 用于定位公网搜索覆盖不到的目标（组织内部系统、SSO 后台、内网域名等）。
 //
 // 用法：
@@ -7,7 +7,7 @@
 //
 //   <关键词>             空格分词、多词 AND，匹配 title + url；可省略
 //   --only <source>      限定数据源（bookmarks / history），默认两者都查
-//   --browser <id>       限定浏览器（chrome / edge），默认遍历所有已安装的
+//   --browser <id>       限定浏览器（chrome / edge / arc），默认遍历所有已安装的
 //   --limit N            条数上限，默认 20；0 = 不限
 //   --since <window>     时间窗（仅作用于历史）。1d / 7h / 30m 或 YYYY-MM-DD
 //   --sort recent|visits 历史排序：按最近访问 / 按访问次数，默认 recent
@@ -71,6 +71,9 @@ function knownBrowserDataDirs() {
       return [
         { id: 'chrome', label: 'Chrome', dir: path.join(home, 'Library/Application Support/Google/Chrome') },
         { id: 'edge',   label: 'Edge',   dir: path.join(home, 'Library/Application Support/Microsoft Edge') },
+        // Arc 不写 Chrome 格式的 Bookmarks（书签存在它自己的 StorableSidebar.json），
+        // History 虽是 Chrome 格式但条目很少。这里加上只是为了让 --browser arc 不直接报错。
+        { id: 'arc',    label: 'Arc',    dir: path.join(home, 'Library/Application Support/Arc/User Data') },
       ];
     case 'linux':
       return [
@@ -81,6 +84,7 @@ function knownBrowserDataDirs() {
       return [
         { id: 'chrome', label: 'Chrome', dir: path.join(localAppData, 'Google/Chrome/User Data') },
         { id: 'edge',   label: 'Edge',   dir: path.join(localAppData, 'Microsoft/Edge/User Data') },
+        { id: 'arc',    label: 'Arc',    dir: path.join(localAppData, 'Arc/User Data') }, // Windows 路径未实测
       ];
     default:
       return [];
