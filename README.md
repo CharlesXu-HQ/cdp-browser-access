@@ -18,10 +18,10 @@ Forked from [eze-is/web-access](https://github.com/eze-is/web-access) (MIT, by �
 
 Chrome, Chrome Canary, Chromium and Edge are picked up automatically once you flip the debug toggle in the browser. **Arc cannot use that toggle** — its server rejects external CDP connections — so it has to be started with a debug flag on a fixed port.
 
-Several browsers can run side by side; they are told apart by the port each one exposes:
+Several browsers can run side by side; they are told apart by the port each one exposes. The CLI prints its messages in Chinese — this line reads *"debug endpoint available:"*:
 
 ```text
-debug endpoint available: Chrome (chrome, port 9222), Arc (arc, port 9333)
+已开启远程调试：Chrome (chrome, port 9222)、Arc (arc, port 9333)
 ```
 
 Choose one with `--browser <id>` for a single run, or persist it as `WEB_ACCESS_BROWSER=<id>` in `config.env`:
