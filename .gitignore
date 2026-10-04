@@ -1,0 +1,8 @@
+# 运行期生成的用户偏好配置（含本机浏览器选择），不应提交
+config.env
+
+# 站点经验是使用中积累的本地数据
+references/site-patterns/*.md
+!references/site-patterns/.gitkeep
+
+.DS_Store
