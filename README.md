@@ -2,9 +2,39 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-A skill that lets an agent drive **your everyday browser over CDP**. It reuses the login sessions already in that browser to reach gated or anti-scraping sites, and handles JS-rendered content, page interaction, screenshots, and video frame capture.
+A skill that lets an agent drive **your everyday browser over CDP** — **Chrome, Chrome Canary, Chromium, Edge, or Arc**. It reuses the login sessions already in that browser to reach gated or anti-scraping sites, and handles JS-rendered content, page interaction, screenshots, and video frame capture.
 
 Forked from [eze-is/web-access](https://github.com/eze-is/web-access) (MIT, by 一泽Eze). This fork is deliberately narrower: **it covers only the browser layer**. General search and static fetching are left to the harness's own tools.
+
+## Supported browsers
+
+| Browser | How it is found | Launch |
+|---|---|---|
+| **Chrome** | `DevToolsActivePort`, written when its `chrome://inspect#remote-debugging` toggle is on | normal launch |
+| **Chrome Canary** | same | normal launch |
+| **Chromium** | same | normal launch |
+| **Edge** | same (`edge://inspect#remote-debugging`) | normal launch |
+| **Arc** | fixed debug port (`9333` / `9229` / `9222`) | must be started with `--remote-debugging-port` — see [Other Chromium browsers](#other-chromium-browsers-arc) |
+
+Chrome, Chrome Canary, Chromium and Edge are picked up automatically once you flip the debug toggle in the browser. **Arc cannot use that toggle** — its server rejects external CDP connections — so it has to be started with a debug flag on a fixed port.
+
+Several browsers can run side by side; they are told apart by the port each one exposes:
+
+```text
+debug endpoint available: Chrome (chrome, port 9222), Arc (arc, port 9333)
+```
+
+Choose one with `--browser <id>` for a single run, or persist it as `WEB_ACCESS_BROWSER=<id>` in `config.env`:
+
+```bash
+node scripts/check-deps.mjs --browser arc        # this run only
+
+# persist it instead — put this in config.env, then restart the resident proxy:
+#   WEB_ACCESS_BROWSER=arc
+pkill -f cdp-proxy.mjs && node scripts/check-deps.mjs
+```
+
+Valid ids: `chrome`, `chrome-canary`, `chromium`, `edge`, `arc`. With no preference set, **Chrome is used when available**; when Chrome is absent and only one browser is running, that one is used; the skill only asks you to choose when there is genuine ambiguity.
 
 ## What it covers
 

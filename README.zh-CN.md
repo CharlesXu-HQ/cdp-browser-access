@@ -2,9 +2,39 @@
 
 [English](README.md) | **简体中文**
 
-让 agent 通过 **CDP 直连你日常使用的浏览器**的 skill。带上你已有的登录态去访问强反爬或需登录的站点，处理 JS 动态渲染、页面交互、截图与视频抽帧。
+让 agent 通过 **CDP 直连你日常使用的浏览器**的 skill —— 支持 **Chrome、Chrome Canary、Chromium、Edge、Arc**。带上你已有的登录态去访问强反爬或需登录的站点，处理 JS 动态渲染、页面交互、截图与视频抽帧。
 
 派生自 [eze-is/web-access](https://github.com/eze-is/web-access)（MIT，作者 一泽Eze）。本 fork 的定位更窄：**只做浏览器那一层**，通用搜索与静态抓取交还给 harness 自带的工具。
+
+## 支持的浏览器
+
+| 浏览器 | 发现方式 | 启动方式 |
+|---|---|---|
+| **Chrome** | `DevToolsActivePort`（打开 `chrome://inspect#remote-debugging` 开关时写入） | 正常启动 |
+| **Chrome Canary** | 同上 | 正常启动 |
+| **Chromium** | 同上 | 正常启动 |
+| **Edge** | 同上（`edge://inspect#remote-debugging`） | 正常启动 |
+| **Arc** | 固定调试端口（`9333` / `9229` / `9222`） | 必须带 `--remote-debugging-port` 启动，详见[其它 Chromium 浏览器](#其它-chromium-浏览器arc) |
+
+Chrome / Chrome Canary / Chromium / Edge 只要在浏览器里打开那个调试开关就会被自动发现。**Arc 不能用那个开关** —— 它的服务器会拒绝外部 CDP 连接 —— 必须带调试参数在固定端口上启动。
+
+多个浏览器可以同时运行，按各自暴露的端口区分：
+
+```text
+已开启远程调试：Chrome (chrome, port 9222)、Arc (arc, port 9333)
+```
+
+用 `--browser <id>` 指定单次使用，或写进 `config.env` 的 `WEB_ACCESS_BROWSER=<id>` 持久化：
+
+```bash
+node scripts/check-deps.mjs --browser arc        # 仅本次
+
+# 持久化则改为在 config.env 里写：
+#   WEB_ACCESS_BROWSER=arc
+pkill -f cdp-proxy.mjs && node scripts/check-deps.mjs
+```
+
+合法 id：`chrome`、`chrome-canary`、`chromium`、`edge`、`arc`。未指定时**有 Chrome 就优先用 Chrome**；Chrome 不在且只有一个浏览器在跑就用那一个；只有真正有歧义时才会询问你。
 
 ## 它解决什么
 
