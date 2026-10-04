@@ -45,14 +45,24 @@
      它自带的 `arc://inspect#remote-debugging` 开关会开端口并写 `DevToolsActivePort`，但该服务器
      **无条件拒绝外部 CDP 连接**（403）；而带 `--remote-debugging-port` 启动时它**不更新**该文件。
      因此 Arc 既不能靠文件发现，也不能用自带开关，只能按固定端口发现。
-   - 发现逻辑改为**两轮 + 真实握手校验**：第一轮按各浏览器的 `DevToolsActivePort` 认领端口，
-     第二轮让带 `flagPorts` 的浏览器认领剩余端口（先认领再兜底，避免把 Chrome 的 9222 误记到 Arc 头上）。
-     端口活着但握手失败（如 Arc 的开关模式）会被剔除 —— 不再仅凭「端口在监听」判定可用。
+   - 发现逻辑改为**两轮**：第一轮按各浏览器的 `DevToolsActivePort` 认领端口（TCP 存活即认，
+     wsPath 取自该文件，与上游行为一致）；第二轮让只有 `flagPorts` 的浏览器认领剩余端口，
+     且要求 `GET /json/version` 能给出 wsPath。先认领再兜底，避免把 Chrome 的 9222 误记到 Arc 头上。
+   - **发现阶段绝不发起 WebSocket**：上游原注释已指出 WebSocket 连接会触发浏览器的
+     「远程调试授权」提示；若在发现阶段反复探测，用户会被反复要求授权。
+     故可用性判据改用 HTTP `GET /json/version` —— 它同样能排除「端口开着但拒绝外部连接」的端点
+     （Arc 开关模式的服务器对其返回 403/404），却不产生任何 WebSocket 连接。
+     `cdp-proxy.mjs` 的兜底路径也一并改为优先直接采用 `/json/version` 给出的路径，
+     仅在拿不到时才去试短路径，把 WebSocket 连接数压到最低。
    - 指定浏览器失败时的报错改为输出该浏览器专属的 `launchHint`（Arc 提示用带参启动并说明开关不可用）。
    - 修正上游遗留 bug：原版把浏览器 id 当作 URL scheme，会输出 `chrome-canary://inspect` 这类无效地址，
      现改为 Edge 用 `edge://`、其余用 `chrome://`。
-   - `find-url` 增加 Arc 数据目录，使 `--browser arc` 不再直接报错（但 Arc 无 Chrome 格式书签、
-     History 条目极少，实际价值有限）。
+   - **未指定浏览器时默认选 Chrome**：原版在检测到多个浏览器时一律询问用户；现改为优先 Chrome，
+     Chrome 不在场且仅有一个候选时自动选它，只有候选之间真正有歧义时才询问。
+   - `find-url` 新增 Arc 专有读取：Arc 不写 Chrome 格式的 `Bookmarks`，其数据在
+     `StorableSidebar.json`（固定标签，字段 `data.tab.savedURL`）与
+     `StorableArchiveItems.json`（归档 ≈ 历史，字段 `sidebarItem.data.tab.savedURL`）中，
+     格式为「数组当字典 + 判别式联合」，时间为 CFAbsoluteTime。解析失败静默降级为空结果。
 
 ## 修复与重写：固定调试端口兜底连接
 

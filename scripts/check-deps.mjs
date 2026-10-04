@@ -135,7 +135,9 @@ async function resolveAndReport(override) {
 
   switch (result.kind) {
     case 'ok': {
-      const sourceTag = result.source === 'override' ? '[--browser 指定]' : '[config.env 偏好]';
+      const sourceTag = result.source === 'override' ? '[--browser 指定]'
+                      : result.source === 'default'  ? '[未指定偏好，自动选用]'
+                      : '[config.env 偏好]';
       console.log(`browser: ok (${result.browser.label}, port ${result.browser.port}) ${sourceTag}`);
       return { proceed: true, browserId: result.browser.id };
     }

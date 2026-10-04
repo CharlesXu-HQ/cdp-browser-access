@@ -61,7 +61,11 @@ Chrome 与 Arc 可以同时运行，按各自占用的端口区分（Arc 默认 
 已开启远程调试：Chrome (chrome, port 9222)、Arc (arc, port 9333)
 ```
 
-> Arc 不写 Chrome 格式的 `Bookmarks` 文件（它的书签存在 `StorableSidebar.json` 里），`History` 虽是 Chrome 格式但条目极少。所以 `find-url` 在 Arc 上基本只能查到历史。
+> Arc 不写 Chrome 格式的 `Bookmarks`，其 Chrome 格式 `History` 也几乎没有内容。因此 `find-url` 改为直接读 Arc 自己的存储：固定标签取自 `StorableSidebar.json`（字段 `data.tab.savedURL`），归档/已关闭标签取自 `StorableArchiveItems.json`。两者都是尽力解析 —— 若 Arc 改了格式，读取器会降级为空结果而不是报错。
+
+### 默认用哪个浏览器
+
+若 `config.env` 未设置 `WEB_ACCESS_BROWSER`，**在有 Chrome 的情况下优先用 Chrome**。若 Chrome 没开调试但恰好只有一个别的浏览器可用，则用那一个。只有当多个浏览器可用、且其中没有 Chrome 时，skill 才会询问你选哪个。
 
 ## 安装
 

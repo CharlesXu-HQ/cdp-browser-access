@@ -30,11 +30,11 @@ export function knownBrowsers() {
         { id: 'chrome-canary', label: 'Chrome Canary',  devToolsPath: path.join(home, 'Library/Application Support/Google/Chrome Canary/DevToolsActivePort') },
         { id: 'chromium',      label: 'Chromium',       devToolsPath: path.join(home, 'Library/Application Support/Chromium/DevToolsActivePort') },
         { id: 'edge',          label: 'Microsoft Edge', devToolsPath: path.join(home, 'Library/Application Support/Microsoft Edge/DevToolsActivePort') },
-        // Arc 只在自带的 arc://inspect 开关模式下写 DevToolsActivePort，而那个服务器
-        // 无条件拒绝外部 CDP 连接（实测 403 Connection rejected）；带 --remote-debugging-port
-        // 启动时它反而不更新该文件（实测 mtime 停在开关模式那一刻）。所以 Arc 只能靠固定端口发现。
+        // Arc 不参与 DevToolsActivePort 发现：它只在自带的 arc://inspect 开关模式下写该文件，
+        // 而那个服务器拒绝外部连接（实测 403 Connection rejected）；带 --remote-debugging-port
+        // 启动时它反而不更新该文件（实测 mtime 停在开关模式那一刻）。
+        // 因此 Arc 只按固定端口发现（detectAll 第二轮），并要求 /json/version 可用。
         { id: 'arc', label: 'Arc',
-          devToolsPath: path.join(home, 'Library/Application Support/Arc/User Data/DevToolsActivePort'),
           flagPorts: [9333, 9229, 9222],
           launchHint: '先退出 Arc，再用 `open -a Arc --args --remote-debugging-port=9333` 启动。' +
                       '注意：Arc 自带的 arc://inspect#remote-debugging 开关虽然能开出端口，但它无条件拒绝外部 CDP 连接（403），不可用。' },
@@ -50,9 +50,8 @@ export function knownBrowsers() {
         { id: 'chrome',   label: 'Chrome',         devToolsPath: path.join(localAppData, 'Google/Chrome/User Data/DevToolsActivePort') },
         { id: 'chromium', label: 'Chromium',       devToolsPath: path.join(localAppData, 'Chromium/User Data/DevToolsActivePort') },
         { id: 'edge',     label: 'Microsoft Edge', devToolsPath: path.join(localAppData, 'Microsoft/Edge/User Data/DevToolsActivePort') },
-        // Windows 上的 Arc 数据目录未实测；flagPorts 机制与 macOS 相同
+        // Windows 上的 Arc 路径未实测；同样只按固定端口发现
         { id: 'arc', label: 'Arc',
-          devToolsPath: path.join(localAppData, 'Arc/User Data/DevToolsActivePort'),
           flagPorts: [9333, 9229, 9222],
           launchHint: '先退出 Arc，再带 `--remote-debugging-port=9333` 参数启动；不要用 Arc 自带的 arc://inspect 开关（它会拒绝外部连接）。' },
       ];
@@ -91,16 +90,13 @@ function readConfig() {
   return cfg;
 }
 
-// --- CDP 端点可用性校验 -------------------------------------------------
-// 仅凭「端口活着」不足以判定可用：Arc 自带的 arc://inspect 开关会开出端口并写
-// DevToolsActivePort，但其服务器无条件拒绝外部 CDP 连接（HTTP 403）。因此这里对每个
-// 候选端点做一次真实 WebSocket 握手，只认能握上的。
+// --- CDP 端点探测 -------------------------------------------------------
+// 关键约束：探测只用 TCP connect 与 HTTP GET /json/version，**绝不发起 WebSocket 握手**。
+// WebSocket 连接会触发浏览器的「远程调试授权」提示；若在发现阶段反复探测，用户会被反复要求授权
+// （上游原注释即为此才用 TCP connect）。用 /json/version 作判据同样能排除「端口开着但拒绝外部
+// 连接」的端点 —— 例如 Arc 自带开关模式的服务器，其 /json/version 返回 404。
 
-function wsUrlFor(port, wsPath) {
-  return wsPath ? `ws://127.0.0.1:${port}${wsPath}` : `ws://127.0.0.1:${port}/devtools/browser`;
-}
-
-// 向 /json/version 询问带 UUID 的完整 wsPath；端点不可用（404 等）时返回 null
+// 向 /json/version 询问带 UUID 的完整 wsPath；端点不可用（404 / 非 CDP 服务）时返回 null
 async function fetchWsPath(port) {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/json/version`, {
@@ -114,67 +110,11 @@ async function fetchWsPath(port) {
   }
 }
 
-// 一次真实握手（连上即断开）。不发送 Origin —— 带 Origin 会被 Chrome/Arc 以 403 拒绝。
-function probeHandshake(port, wsPath, timeoutMs = 2500) {
-  if (typeof globalThis.WebSocket === 'undefined') {
-    return Promise.resolve({ ok: false, err: '当前 Node 无原生 WebSocket（需 22+）' });
-  }
-  return new Promise((resolve) => {
-    let sock = null;
-    let settled = false;
-    let timer = null;
-    const done = (ok, err) => {
-      if (settled) return;
-      settled = true;
-      if (timer) clearTimeout(timer);
-      try { if (sock) sock.close(); } catch {}
-      resolve({ ok, err });
-    };
-    timer = setTimeout(() => done(false, '握手超时'), timeoutMs);
-    try {
-      sock = new globalThis.WebSocket(wsUrlFor(port, wsPath));
-    } catch (e) {
-      return done(false, (e && e.message) || String(e));
-    }
-    const onOpen = () => done(true);
-    const onErr = (e) => done(false, (e && (e.message || (e.error && e.error.message))) || '握手失败');
-    if (typeof sock.addEventListener === 'function') {
-      sock.addEventListener('open', onOpen);
-      sock.addEventListener('error', onErr);
-    }
-    if ('onopen' in sock) sock.onopen = onOpen;
-    if ('onerror' in sock) sock.onerror = onErr;
-    if (typeof sock.on === 'function') {
-      sock.on('open', onOpen);
-      sock.on('error', onErr);
-    }
-  });
-}
-
-// 在一个端口上找出真正可用的 wsPath。
-// 候选顺序：DevToolsActivePort 记录的路径 → /json/version 提供的完整路径 → 短路径。
-// 不同 Chromium 变体接受的形式不同：Chrome 认短路径，Arc 与 headless Chrome 只认完整路径。
-async function resolveEndpoint(port, wsPathHint = null) {
-  const candidates = [];
-  if (wsPathHint) candidates.push({ wsPath: wsPathHint, label: '记录路径' });
-  const httpPath = await fetchWsPath(port);
-  if (httpPath && httpPath !== '/devtools/browser' && httpPath !== wsPathHint) {
-    candidates.push({ wsPath: httpPath, label: '/json/version' });
-  }
-  if (!candidates.some((c) => !c.wsPath)) candidates.push({ wsPath: null, label: '短路径' });
-
-  let lastErr = null;
-  for (const c of candidates) {
-    const r = await probeHandshake(port, c.wsPath);
-    if (r.ok) return { ok: true, wsPath: c.wsPath, via: c.label };
-    lastErr = r.err;
-  }
-  return { ok: false, err: lastErr };
-}
-
-// 返回真正可用的浏览器列表。两轮进行：
-//   第一轮 —— 按各浏览器的 DevToolsActivePort 认领端口；
-//   第二轮 —— 带 flagPorts 的浏览器（如 Arc，它不更新该文件）认领剩余端口。
+// 返回可用浏览器列表。两轮进行，全程不发 WebSocket：
+//   第一轮 —— 有 DevToolsActivePort 的浏览器（Chrome / Canary / Chromium / Edge）：
+//              TCP 活着即认，wsPath 直接取自该文件。与上游行为一致。
+//   第二轮 —— 只有 flagPorts 的浏览器（Arc，它不写/不更新该文件）：
+//              TCP 活着，且 /json/version 能给出 wsPath 才认。
 // 先认领再兜底，避免把 Chrome 占着的 9222 误记到 Arc 头上。
 async function detectAll() {
   const result = [];
@@ -182,6 +122,7 @@ async function detectAll() {
   const all = knownBrowsers();
 
   for (const browser of all) {
+    if (!browser.devToolsPath) continue;
     let content;
     try { content = fs.readFileSync(browser.devToolsPath, 'utf8'); }
     catch { continue; }
@@ -190,10 +131,8 @@ async function detectAll() {
     if (!(port > 0 && port < 65536)) continue;
     if (claimed.has(port)) continue;
     if (!(await checkPort(port))) continue;
-    const ep = await resolveEndpoint(port, lines[1] || null);
-    if (!ep.ok) continue; // 端口活着但拒绝外部连接 —— 例如 Arc 的开关模式
     claimed.add(port);
-    result.push({ ...browser, port, wsPath: ep.wsPath, via: `DevToolsActivePort/${ep.via}` });
+    result.push({ ...browser, port, wsPath: lines[1] || null, via: 'DevToolsActivePort' });
   }
 
   for (const browser of all) {
@@ -202,10 +141,10 @@ async function detectAll() {
     for (const port of browser.flagPorts) {
       if (claimed.has(port)) continue;
       if (!(await checkPort(port))) continue;
-      const ep = await resolveEndpoint(port, null);
-      if (!ep.ok) continue;
+      const wsPath = await fetchWsPath(port);
+      if (!wsPath) continue;   // 端口活着但不是可用的 CDP 端点（如 Arc 开关模式的 403 服务器）
       claimed.add(port);
-      result.push({ ...browser, port, wsPath: ep.wsPath, via: `flagPorts/${ep.via}` });
+      result.push({ ...browser, port, wsPath, via: 'flagPorts' });
       break;
     }
   }
@@ -238,9 +177,17 @@ export async function selectBrowser(override = null) {
     return { kind: 'mismatch', source: 'preference', detected, configured };
   }
 
-  // 3. 无偏好 —— 一律询问用户（哪怕 detected 只有一个）
+  // 3. 无偏好 —— 默认优先 Chrome（用户约定），避免每次都打断询问。
+  //    Chrome 不在场时：只有一个候选就自动用它；多个候选才询问，不替用户做有歧义的决定。
+  const preferred = detected.find(b => b.id === 'chrome');
+  if (preferred) {
+    return { kind: 'ok', browser: preferred, source: 'default', detected, configured };
+  }
   if (detected.length === 0) {
     return { kind: 'empty', detected, configured };
+  }
+  if (detected.length === 1) {
+    return { kind: 'ok', browser: detected[0], source: 'default', detected, configured };
   }
   return { kind: 'ambiguous', detected, configured };
 }

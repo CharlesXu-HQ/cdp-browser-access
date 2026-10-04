@@ -203,6 +203,94 @@ function printHistory(items, showBrowser, showProfile, sortLabel) {
   }
 }
 
+// --- Arc 专有存储（Chrome 格式之外）---------------------------------------
+// Arc 不写 Chrome 格式的 Bookmarks，其 Chrome 格式 History 也几乎没有内容。
+// 实际数据在它自己的 JSON 里，格式为「数组当字典 + 判别式联合」，无公开文档：
+//   固定标签（收藏）  → <Arc>/StorableSidebar.json       条目 data.tab.savedURL
+//   归档（关闭的标签）→ <Arc>/StorableArchiveItems.json  条目 sidebarItem.data.tab.savedURL
+// 时间字段是 CFAbsoluteTime（2001-01-01 起的秒数，浮点）。
+// 解析失败一律静默返回空数组 —— Arc 的格式可能随版本变化，不能让整个命令挂掉。
+
+const ARC_EPOCH_OFFSET_S = 978307200; // 2001-01-01 相对 Unix 纪元的秒数
+
+// Arc 把字典存成 [key, value, key, value, ...]；这里只取其中的对象值
+function arcObjects(arr) {
+  if (!Array.isArray(arr)) return [];
+  return arr.filter(x => x && typeof x === 'object' && !Array.isArray(x));
+}
+
+function arcTimeToDate(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const d = new Date((n + ARC_EPOCH_OFFSET_S) * 1000);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function arcFmt(d) {
+  if (!d) return '';
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
+function arcMatches(hay, keywords) {
+  const h = String(hay).toLowerCase();
+  return keywords.every(k => h.includes(k));
+}
+
+// Arc 的 JSON 存在用户数据目录的上一级（<Arc>/，而 profile 目录是 <Arc>/User Data/Default）
+function arcRootOf(dataDir) {
+  return path.dirname(dataDir);
+}
+
+// 收藏 = 侧边栏里的固定标签
+function readArcBookmarks(arcRoot, keywords) {
+  if (!keywords.length) return [];   // 与 Chrome 书签一致：书签无时间维度，无关键词不返回
+  let j;
+  try { j = JSON.parse(fs.readFileSync(path.join(arcRoot, 'StorableSidebar.json'), 'utf-8')); }
+  catch { return []; }
+  const containers = j && j.sidebar && j.sidebar.containers;
+  if (!Array.isArray(containers)) return [];
+
+  const titleById = new Map();
+  const tabs = [];
+  for (const c of containers) {
+    for (const it of arcObjects(c && c.items)) {
+      if (it.id && typeof it.title === 'string') titleById.set(it.id, it.title);
+      const url = it.data && it.data.tab && it.data.tab.savedURL;
+      if (typeof url === 'string' && url) tabs.push({ it, url });
+    }
+  }
+  const out = [];
+  for (const { it, url } of tabs) {
+    const name = it.title || '';
+    if (!arcMatches(`${name} ${url}`, keywords)) continue;
+    out.push({
+      browser: 'Arc', profile: 'Default', name, url,
+      folder: titleById.get(it.parentID) || '固定标签',
+    });
+  }
+  return out;
+}
+
+// 归档（关闭的标签）≈ 历史
+function readArcArchive(arcRoot, keywords, since) {
+  let j;
+  try { j = JSON.parse(fs.readFileSync(path.join(arcRoot, 'StorableArchiveItems.json'), 'utf-8')); }
+  catch { return []; }
+  const out = [];
+  for (const rec of arcObjects(j && j.items)) {
+    const si = rec.sidebarItem || {};
+    const url = si.data && si.data.tab && si.data.tab.savedURL;
+    if (typeof url !== 'string' || !url) continue;
+    const title = si.title || '';
+    if (keywords.length && !arcMatches(`${title} ${url}`, keywords)) continue;
+    const d = arcTimeToDate(rec.archivedAt) || arcTimeToDate(si.createdAt);
+    if (since && d && d < since) continue;
+    out.push({ browser: 'Arc', profile: 'Default', title, url, visit: arcFmt(d), visit_count: 1 });
+  }
+  return out;
+}
+
 // --- main ---------------------------------------------------------------
 const args = parseArgs(process.argv.slice(2));
 
@@ -215,7 +303,7 @@ if (args.browser) {
   }
   browsers = filtered;
 }
-if (!browsers.length) die('未找到任何浏览器（Chrome / Edge）的用户数据目录');
+if (!browsers.length) die('未找到任何浏览器（Chrome / Edge / Arc）的用户数据目录');
 
 const doBookmarks = args.only !== 'history';
 const doHistory   = args.only !== 'bookmarks';
@@ -223,6 +311,13 @@ const doHistory   = args.only !== 'bookmarks';
 const bookmarks = [];
 const history = [];
 for (const browser of browsers) {
+  if (browser.id === 'arc') {
+    // Arc 的数据不在 profile 目录里，而在用户数据目录的上一级 —— 走专有读取
+    const arcRoot = arcRootOf(browser.dir);
+    if (doBookmarks) bookmarks.push(...readArcBookmarks(arcRoot, args.keywords));
+    if (doHistory)   history.push(...readArcArchive(arcRoot, args.keywords, args.since));
+    continue;
+  }
   const profiles = listProfiles(browser.dir);
   for (const p of profiles) {
     const pDir = path.join(browser.dir, p.dir);

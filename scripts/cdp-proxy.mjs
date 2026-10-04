@@ -104,25 +104,21 @@ function probeBrowserWs(port, wsPath, timeoutMs = 5000) {
 }
 
 // 兜底场景下确定 browser WebSocket 路径。
-// 不同 Chrome 实例接受的形式不同：headless 只认 /json/version 给出的带 UUID 全路径，
-// 而真实 Chrome 对短路径 /devtools/browser 同样返回 101。因此逐个候选做真实握手，取能通的那个。
-// 返回 { wsPath, label } 表示成功（wsPath 可能是 null，代表用短路径）；
-// 返回 { wsPath: undefined, err, tried } 表示全部候选失败。
+// 不同 Chromium 变体接受的形式不同：headless Chrome 与 Arc 只认 /json/version 给出的带 UUID 全路径，
+// 而真实 Chrome 对短路径 /devtools/browser 同样返回 101。
+//
+// 注意：这里尽量少发 WebSocket —— 每次握手都可能触发浏览器的「远程调试授权」提示。
+// 因此 /json/version 能给出路径时直接采用（那是权威来源），只有在拿不到时才去试短路径。
+// 返回 { wsPath, label } 表示成功（wsPath 为 null 代表用短路径）；
+// 返回 { wsPath: undefined, err, tried } 表示失败。
 async function resolveFallbackWsPath(port) {
   const fullPath = await fetchBrowserWsPath(port);
-  const candidates = [];
   if (fullPath && fullPath !== '/devtools/browser') {
-    candidates.push({ wsPath: fullPath, label: '完整路径(/json/version)' });
+    return { wsPath: fullPath, label: '完整路径(/json/version)' };
   }
-  candidates.push({ wsPath: null, label: '短路径(/devtools/browser)' });
-
-  let lastErr = null;
-  for (const c of candidates) {
-    const r = await probeBrowserWs(port, c.wsPath);
-    if (r.ok) return { wsPath: c.wsPath, label: c.label };
-    lastErr = r.err;
-  }
-  return { wsPath: undefined, err: lastErr, tried: candidates.length };
+  const r = await probeBrowserWs(port, null);
+  if (r.ok) return { wsPath: null, label: '短路径(/devtools/browser)' };
+  return { wsPath: undefined, err: r.err, tried: 1 };
 }
 
 // --- 自动发现浏览器调试端口 ---

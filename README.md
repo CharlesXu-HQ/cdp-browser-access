@@ -61,7 +61,11 @@ Chrome and Arc can run side by side; they are told apart by the port each one cl
 debug endpoint available: Chrome (chrome, port 9222), Arc (arc, port 9333)
 ```
 
-> Arc writes no Chrome-format `Bookmarks` file (its bookmarks live in `StorableSidebar.json`), and its `History` is Chrome-format but nearly empty. `find-url` on Arc therefore returns little beyond history.
+> Arc keeps no Chrome-format `Bookmarks` file, and its Chrome-format `History` is nearly empty. `find-url` therefore reads Arc's own stores instead: pinned tabs from `StorableSidebar.json` (field `data.tab.savedURL`) and archived/closed tabs from `StorableArchiveItems.json`. Both are parsed on a best-effort basis — if Arc changes the format, the reader degrades to empty results rather than failing.
+
+### Which browser is used by default
+
+If `config.env` sets no `WEB_ACCESS_BROWSER`, **Chrome is used when it is available**. If Chrome is not running with debugging enabled but exactly one other browser is, that one is used. Only when several browsers are available and none of them is Chrome does the skill ask you to choose.
 
 ## Installation
 
