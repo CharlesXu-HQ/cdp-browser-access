@@ -1,5 +1,7 @@
 # cdp-browser-access
 
+**简体中文** | [English](README.en.md)
+
 让 agent 通过 **CDP 直连你日常使用的浏览器**的 skill。带上你已有的登录态去访问强反爬或需登录的站点，处理 JS 动态渲染、页面交互、截图与视频抽帧。
 
 派生自 [eze-is/web-access](https://github.com/eze-is/web-access)（MIT，作者 一泽Eze）。本 fork 的定位更窄：**只做浏览器那一层**，通用搜索与静态抓取交还给 harness 自带的工具。
@@ -81,7 +83,8 @@ node scripts/cdp-proxy.mjs --probe-only 9222
 
 ```
 SKILL.md                     用法说明（agent 触发时读这个）
-README.md                    本文件
+README.md                    中文说明（默认）
+README.en.md                 English README
 NOTICE.md                    上游署名、改动清单、修复记录
 LICENSE                      MIT
 config.env                   运行时生成的浏览器偏好（已 gitignore）
