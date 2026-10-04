@@ -242,6 +242,12 @@ function arcRootOf(dataDir) {
   return path.dirname(dataDir);
 }
 
+// Arc 条目的标题常常不在 it.title 上（固定标签那里实测为 null），
+// 真实标题在 data.tab.savedTitle；两处都可能是 null / 非字符串。
+function arcTitle(v) {
+  return typeof v === 'string' ? v.trim() : '';
+}
+
 // 收藏 = 侧边栏里的固定标签
 function readArcBookmarks(arcRoot, keywords) {
   if (!keywords.length) return [];   // 与 Chrome 书签一致：书签无时间维度，无关键词不返回
@@ -256,13 +262,16 @@ function readArcBookmarks(arcRoot, keywords) {
   for (const c of containers) {
     for (const it of arcObjects(c && c.items)) {
       if (it.id && typeof it.title === 'string') titleById.set(it.id, it.title);
-      const url = it.data && it.data.tab && it.data.tab.savedURL;
-      if (typeof url === 'string' && url) tabs.push({ it, url });
+      const tab = it.data && it.data.tab;
+      const url = tab && tab.savedURL;
+      // 标题优先取 data.tab.savedTitle —— 固定标签的 it.title 往往为 null，
+      // 真实标题只存在 savedTitle 里（实测：Bing 那条 it.title=null 而 savedTitle 有值）
+      if (typeof url === 'string' && url) tabs.push({ it, tab, url });
     }
   }
   const out = [];
-  for (const { it, url } of tabs) {
-    const name = it.title || '';
+  for (const { it, tab, url } of tabs) {
+    const name = arcTitle(tab && tab.savedTitle) || it.title || '';
     if (!arcMatches(`${name} ${url}`, keywords)) continue;
     out.push({
       browser: 'Arc', profile: 'Default', name, url,
@@ -280,9 +289,11 @@ function readArcArchive(arcRoot, keywords, since) {
   const out = [];
   for (const rec of arcObjects(j && j.items)) {
     const si = rec.sidebarItem || {};
-    const url = si.data && si.data.tab && si.data.tab.savedURL;
+    const tab = si.data && si.data.tab;
+    const url = tab && tab.savedURL;
     if (typeof url !== 'string' || !url) continue;
-    const title = si.title || '';
+    // 与收藏同理：si.title 常为 null，真实标题在 data.tab.savedTitle
+    const title = arcTitle(tab && tab.savedTitle) || si.title || '';
     if (keywords.length && !arcMatches(`${title} ${url}`, keywords)) continue;
     const d = arcTimeToDate(rec.archivedAt) || arcTimeToDate(si.createdAt);
     if (since && d && d < since) continue;

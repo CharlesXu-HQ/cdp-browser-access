@@ -63,6 +63,11 @@
      `StorableSidebar.json`（固定标签，字段 `data.tab.savedURL`）与
      `StorableArchiveItems.json`（归档 ≈ 历史，字段 `sidebarItem.data.tab.savedURL`）中，
      格式为「数组当字典 + 判别式联合」，时间为 CFAbsoluteTime。解析失败静默降级为空结果。
+   - **标题必须取 `data.tab.savedTitle`**：Arc 条目上层的 `title`（固定标签的 `it.title`、
+     归档的 `sidebarItem.title`）实测常为 `null`，真实标题只存在 `savedTitle` 里。
+     早期版本只读了上层 `title`，导致条目显示为「(无标题)」且无法按标题检索（例如
+     「搜索 - Microsoft 必应」这条只能按 URL 里的 `bing` 命中，按「必应」查不到）。
+     现改为 `savedTitle` 优先、上层 `title` 兜底。
 
 ## 修复与重写：固定调试端口兜底连接
 

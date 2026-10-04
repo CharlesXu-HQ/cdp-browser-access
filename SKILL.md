@@ -13,7 +13,7 @@ metadata:
   author: 一泽Eze
   upstream: https://github.com/eze-is/web-access
   upstream_version: "2.5.4"
-  version: "3.0.0-dsh.4"
+  version: "3.0.0-dsh.5"
   fork_note: harness 中性定制版（DSH 为主，同时可用于 Codex）：剥离与 harness 原生工具重叠的搜索/抓取层，收窄触发条件，本地书签/历史检索提升为条件性第一步
 ---
 
