@@ -57,6 +57,18 @@ pkill -f cdp-proxy.mjs && node scripts/check-deps.mjs
   （Edge 为 `edge://inspect/#remote-debugging`），勾选
   `Allow remote debugging for this browser instance`。
   首次连接可能出现授权弹窗，点「允许」即可。
+
+### 只需要授权一次
+
+Chrome 144+ 对**每一条新**调试连接都会要求确认，且不提供「记住授权」的机制（见 [chrome-devtools-mcp#825](https://github.com/ChromeDevTools/chrome-devtools-mcp/issues/825)）。因此自带的 proxy 不会频繁重连，而是把连接保持住：
+
+- 保活心跳：每 25 秒发一条极轻的 CDP 命令（`Browser.getVersion`）；
+- 连接失败会退避重试（5 秒起、逐次翻倍、上限 60 秒），避免一次授权被放大成多个弹窗；
+- proxy 作为常驻进程运行，多次调用复用同一条连接。
+
+只要浏览器与 proxy 都在运行，你**授权一次**后就不会再看到弹窗。若连接真的断了 —— 浏览器重启、机器休眠唤醒、proxy 被杀 —— 下一次建连会再要一次授权；这是 Chrome 的安全设计，无法绕过。
+
+可用 `CDP_KEEPALIVE_MS`（保活间隔，默认 25000）与 `CDP_CONNECT_TIMEOUT_MS`（等待授权的时长，默认 180000）调整。
 - macOS 需要可用的 `sqlite3`（系统自带，或 conda / Homebrew 提供的都行），用于读取浏览器历史
 
 ### 其它 Chromium 浏览器（Arc）

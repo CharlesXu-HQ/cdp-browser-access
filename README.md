@@ -56,7 +56,19 @@ Valid ids: `chrome`, `chrome-canary`, `chromium`, `edge`, `arc`. With no prefere
   visit `chrome://inspect/#remote-debugging`
   (`edge://inspect/#remote-debugging` on Edge) and check
   `Allow remote debugging for this browser instance`.
-  An authorization prompt may appear on first connect — click "Allow".
+  An authorization prompt appears on first connect — click "Allow" once.
+
+### Approving only once
+
+Chrome 144+ asks for confirmation on **every new** DevTools connection and provides no way to remember the choice ([chrome-devtools-mcp#825](https://github.com/ChromeDevTools/chrome-devtools-mcp/issues/825)). The bundled proxy therefore keeps its connection alive rather than reconnecting:
+
+- a keepalive sends one cheap CDP command (`Browser.getVersion`) every 25 s;
+- failed connection attempts back off (5 s, doubling, capped at 60 s) so a single prompt is not multiplied into several;
+- the proxy runs as a resident daemon and reuses the same connection across invocations.
+
+As long as the browser and the proxy keep running, you approve **once** and never see the prompt again. If the connection really drops — browser restarted, machine resumed from sleep, proxy killed — the next connection asks again. That is Chrome's security design and cannot be bypassed.
+
+Tune with `CDP_KEEPALIVE_MS` (keepalive interval, default 25000) and `CDP_CONNECT_TIMEOUT_MS` (how long to wait for the approval, default 180000).
 - On macOS, a working `sqlite3` (system, conda, or Homebrew are all fine) for reading browser history
 
 ### Other Chromium browsers (Arc)

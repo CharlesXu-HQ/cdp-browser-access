@@ -31,6 +31,14 @@ const managedTabs = new Map(); // targetId -> { lastAccessed: number }
 const TAB_IDLE_TIMEOUT = parseInt(process.env.CDP_TAB_IDLE_TIMEOUT || '900000'); // 15 min default
 const CLEANUP_INTERVAL = 60000; // sweep every 60s
 
+// 保活与重连策略。
+// 背景：Chrome 144+ 起，通过 chrome://inspect#remote-debugging 开关暴露的调试端口，
+// 每新建一条调试连接都会弹一次授权确认，且官方明确不提供「记住授权」（见
+// ChromeDevTools/chrome-devtools-mcp#825）。所以「只授权一次」的唯一办法是——保住这一条连接。
+const KEEPALIVE_INTERVAL = parseInt(process.env.CDP_KEEPALIVE_MS || '25000'); // 25s 心跳
+const CONNECT_TIMEOUT = parseInt(process.env.CDP_CONNECT_TIMEOUT_MS || '180000'); // 等用户点「允许」的耐心
+const CONNECT_BACKOFF_MAX = 60000; // 连接失败退避上限
+
 // --- WebSocket 兼容层 ---
 let WS;
 if (typeof globalThis.WebSocket !== 'undefined') {
@@ -186,9 +194,43 @@ let chromePort = null;
 let chromeWsPath = null;
 
 let connectingPromise = null;
+let keepaliveTimer = null;
+let connectFailures = 0;
+let connectCooldownUntil = 0;
+
+// 保活：定期发一条极轻的 CDP 命令，避免连接因长时间空闲被浏览器回收。
+// 连接一断，Chrome 就会要求重新授权，所以保住连接 = 用户只需授权一次。
+function startKeepalive() {
+  stopKeepalive();
+  keepaliveTimer = setInterval(async () => {
+    if (!ws) return;
+    const st = ws.readyState;
+    if (st !== WS.OPEN && st !== 1) return;
+    try {
+      await sendCDP('Browser.getVersion');
+    } catch (e) {
+      console.error('[CDP Proxy] 保活失败，主动断开以便重连:', e.message);
+      try { ws.close(); } catch {}
+    }
+  }, KEEPALIVE_INTERVAL);
+  if (keepaliveTimer.unref) keepaliveTimer.unref();
+}
+
+function stopKeepalive() {
+  if (keepaliveTimer) {
+    clearInterval(keepaliveTimer);
+    keepaliveTimer = null;
+  }
+}
 async function connect() {
   if (ws && (ws.readyState === WS.OPEN || ws.readyState === 1)) return;
   if (connectingPromise) return connectingPromise;  // 复用进行中的连接
+
+  // 失败后退避：否则每次 API 请求都会新开一条 WebSocket —— Chrome 会连续弹出多个授权框
+  if (Date.now() < connectCooldownUntil) {
+    const wait = Math.max(1, Math.ceil((connectCooldownUntil - Date.now()) / 1000));
+    throw new Error(`连接冷却中（约 ${wait}s 后重试）—— 上一次连接未完成，Chrome 可能还在等你点「允许」`);
+  }
 
   if (!chromePort) {
     const discovered = await discoverChromePort();
@@ -207,27 +249,54 @@ async function connect() {
   const wsUrl = getWebSocketUrl(chromePort, chromeWsPath);
   if (!wsUrl) throw new Error('无法获取 Chrome WebSocket URL');
 
-  return connectingPromise = new Promise((resolve, reject) => {
-    ws = new WS(wsUrl);
+  console.log(`[CDP Proxy] 正在连接浏览器 (端口 ${chromePort})。若 Chrome 弹出「允许远程调试」，请点「允许」—— 授权一次后这条连接会保持，不必再授权`);
 
-    const onOpen = () => {
+  return connectingPromise = new Promise((resolve, reject) => {
+    const connectTimer = setTimeout(() => {
       cleanup();
       connectingPromise = null;
-      console.log(`[CDP Proxy] 已连接浏览器 (端口 ${chromePort})`);
-      resolve();
-    };
-    const onError = (e) => {
-      cleanup();
-      connectingPromise = null;
+      stopKeepalive();
+      try { if (ws) ws.close(); } catch {}
       ws = null;
       chromePort = null;
       chromeWsPath = null;
+      connectFailures += 1;
+      const delay = Math.min(5000 * 2 ** (connectFailures - 1), CONNECT_BACKOFF_MAX);
+      connectCooldownUntil = Date.now() + delay;
+      reject(new Error(`连接超时（${Math.round(CONNECT_TIMEOUT / 1000)}s 未完成）—— Chrome 的授权弹窗可能没点「允许」`));
+    }, CONNECT_TIMEOUT);
+
+    ws = new WS(wsUrl);
+
+    const onOpen = () => {
+      clearTimeout(connectTimer);
+      cleanup();
+      connectingPromise = null;
+      connectFailures = 0;
+      connectCooldownUntil = 0;
+      startKeepalive();
+      console.log(`[CDP Proxy] 已连接浏览器 (端口 ${chromePort})；已开启保活（每 ${Math.round(KEEPALIVE_INTERVAL / 1000)}s），连接保持、无需重复授权`);
+      resolve();
+    };
+    const onError = (e) => {
+      clearTimeout(connectTimer);
+      cleanup();
+      connectingPromise = null;
+      stopKeepalive();
+      ws = null;
+      chromePort = null;
+      chromeWsPath = null;
+      connectFailures += 1;
+      const delay = Math.min(5000 * 2 ** (connectFailures - 1), CONNECT_BACKOFF_MAX);
+      connectCooldownUntil = Date.now() + delay;
       const msg = e.message || e.error?.message || '连接失败';
-      console.error('[CDP Proxy] 连接错误:', msg, '（端口缓存已清除，下次将重新发现）');
+      console.error(`[CDP Proxy] 连接错误: ${msg}（${Math.round(delay / 1000)}s 后重试。若 Chrome 有授权弹窗，请点「允许」）`);
       reject(new Error(msg));
     };
     const onClose = () => {
-      console.log('[CDP Proxy] 连接断开');
+      clearTimeout(connectTimer);
+      stopKeepalive();
+      console.log('[CDP Proxy] 连接断开 —— 重新连接时 Chrome 会再要一次授权');
       ws = null;
       chromePort = null; // 重置端口缓存，下次连接重新发现
       chromeWsPath = null;
@@ -740,6 +809,7 @@ async function main() {
 
   const shutdown = async (sig) => {
     console.log(`[CDP Proxy] ${sig}, cleaning up...`);
+    stopKeepalive();
     clearInterval(cleanupTimer);
     await closeAllManagedTabs();
     process.exit(0);

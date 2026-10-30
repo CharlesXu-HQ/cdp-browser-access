@@ -13,7 +13,7 @@ metadata:
   author: 一泽Eze
   upstream: https://github.com/eze-is/web-access
   upstream_version: "2.5.4"
-  version: "3.0.0-dsh.5"
+  version: "3.0.0-dsh.6"
   fork_note: harness 中性定制版（DSH 为主，同时可用于 Codex）：剥离与 harness 原生工具重叠的搜索/抓取层，收窄触发条件，本地书签/历史检索提升为条件性第一步
 ---
 
@@ -143,6 +143,14 @@ node scripts/check-deps.mjs
 > **前置条件（改不掉）**：目标浏览器需开启远程调试开关 —— 地址栏访问
 > `chrome://inspect/#remote-debugging`（Edge 为 `edge://inspect/#remote-debugging`），
 > 勾选 "Allow remote debugging for this browser instance"。首次连接可能弹出授权框，需用户点「允许」。
+>
+> **为什么只需要授权一次**：Chrome 144+ 对这条通道实行「每条新连接都要用户确认一次」，
+> 且官方明确不提供持久化授权。因此 Proxy 会**保活这条连接**（默认每 25s 发一条极轻的 CDP 命令），
+> 让它长期不断开。用户点一次「允许」后，只要浏览器与 Proxy 都在运行，就不会再弹。
+>
+> 若连接真的断了（浏览器重启、机器休眠唤醒、Proxy 被杀），下一次建连会**再要一次授权** ——
+> 这是 Chrome 的安全设计，无法绕过。此时直接点「允许」即可，不要反复重启 Proxy。
+> 连接失败时 Proxy 会退避重试（5s 起、指数增长、上限 60s），避免连续弹出多个授权框。
 
 ### Proxy API
 
